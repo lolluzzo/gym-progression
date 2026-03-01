@@ -16,41 +16,55 @@ For help getting started with Flutter development, view the
 samples, guidance on mobile development, and a full API reference.
 
 
-## MVP
-1. Definisci il "Core" (MVP)
-Prima di aggiungere grafici complicati, focalizzati sulle funzioni vitali. Per un'app di palestra, di solito sono:
+Here is a clean, professional MVP Specification Document in English based on your requirements. You can keep this in your project's docs/ folder or your README.md.
 
-Log degli allenamenti: Creazione di schede e inserimento pesi/ripetizioni.
+📋 Gym Progression App - MVP Specification
+1. Core Features (The "Must-Haves")
+The initial version focuses on the essential workout loop to ensure a functional user experience from day one.
 
-Database esercizi: Una lista (anche statica all'inizio) con nomi e categorie (Petto, Dorso, ecc.).
+Workout Logger: * Create and manage workout routines (Templates).
 
-Timer di recupero: Un piccolo widget essenziale tra una serie e l'altra.
+Input real-time data: Exercise name, Sets, Repetitions, and Weight.
 
-2. Architettura e Stato (Fondamentale)
-Non scrivere tutto in un unico file. Scegli subito come gestire i dati.
+Exercise Database: * A searchable catalog of exercises categorized by muscle groups (e.g., Chest, Back, Legs).
 
-State Management: Ti consiglio Riverpod (moderno e robusto) o Provider (più semplice per iniziare). Evita di gestire tutto con setState se l'app crescerà.
+Initial version: Static local list (Hardcoded or JSON).
 
-Cartelle: Organizza il progetto in modo pulito:
+Rest Timer: * A simple, integrated countdown widget to manage recovery time between sets.
 
-/models: Le classi dei dati (es. Exercise, Workout).
+2. Architecture & State Management
+To ensure scalability, the project follows a modular structure from the start.
 
-/screens: Le pagine dell'app.
+State Management: Riverpod (Recommended) or Provider.
 
-/widgets: Componenti riutilizzabili (es. il bottone personalizzato).
+Goal: Decouple business logic from the UI and avoid "SetState Hell."
 
-/services: Logica per database o API.
+Project Directory Structure:
 
-3. Il Database Locale
-Un'app di palestra deve funzionare offline. Non vuoi che l'utente si blocchi perché il Wi-Fi della sala pesi non prende.
+/lib/models: Data structures (e.g., Exercise, Workout, Set).
 
-Isar o Hive: Database NoSQL velocissimi e facili da usare in Flutter.
+/lib/screens: Primary views (Dashboard, Active Workout, History).
 
-SQLite (sqflite): Se preferisci il classico approccio relazionale.
+/lib/widgets: Reusable UI components (Custom buttons, Input fields).
 
-4. UI/UX: Il "Look & Feel"
-Le app di fitness hanno spesso un design scuro (Dark Mode) o molto energico.
+/lib/services: Persistence logic and database handlers.
 
-Usa i Material 3 widget (già inclusi in Flutter).
+/lib/providers: Logic for state management.
 
-Sfrutta pacchetti come fl_chart se vuoi mostrare i progressi del peso nel tempo.
+3. Local Persistence (Offline-First)
+Gyms often have poor connectivity. The app must work 100% offline.
+
+Database Engine: Isar or Hive (NoSQL).
+
+Reason: High performance for mobile and easy object mapping in Flutter.
+
+Alternative: SQLite (sqflite) for developers preferring relational data structures.
+
+4. UI/UX Strategy
+A modern, high-energy interface to keep users motivated.
+
+Design System: Material 3 (Default Flutter 3.x widgets).
+
+Theme: Default Dark Mode to reduce eye strain in gym environments and save battery.
+
+Data Visualization: Integration of fl_chart for future progress tracking (weight/volume over time).
