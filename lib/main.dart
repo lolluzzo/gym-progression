@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:gym_progression/screens/StartUpApp.dart';
+import 'package:gym_progression/services/database_initializer.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializeDatabase();
   runApp(const MyApp());
 }
 

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:gym_progression/models/workout.dart';
+import 'package:gym_progression/screens/exercise_history_logs.dart';
+import 'package:gym_progression/services/exercise_log_storage.dart';
 
 class WorkoutDetailScreen extends StatefulWidget {
   const WorkoutDetailScreen({super.key, required this.workout});
@@ -106,6 +108,42 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
     return '${monday.year}-${monday.month.toString().padLeft(2, '0')}-${monday.day.toString().padLeft(2, '0')}';
   }
 
+  Future<void> _saveExerciseLog(ExerciseEntry exercise) async {
+    try {
+      await ExerciseLogStorage.saveLog(
+        exerciseName: exercise.name,
+        weight: _weightControllers[exercise.id]?.text,
+        reps: _repsControllers[exercise.id]?.text,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved log for ${exercise.name}.')),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to save the log.')),
+      );
+    }
+  }
+
+  void _openExerciseHistory(ExerciseEntry exercise) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ExerciseHistoryLogsScreen(
+          exerciseName: exercise.name,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -172,6 +210,23 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
                     Text(
                       exercise.name,
                       style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: () => _saveExerciseLog(exercise),
+                          icon: const Icon(Icons.save_outlined),
+                          label: const Text('Save log'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => _openExerciseHistory(exercise),
+                          icon: const Icon(Icons.history),
+                          label: const Text('View history'),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 16),
                     Row(
