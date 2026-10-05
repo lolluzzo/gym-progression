@@ -1,12 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:gym_progression/models/achievement.dart';
 import 'package:gym_progression/models/workout.dart';
 import 'package:gym_progression/screens/exercise_history_logs.dart';
 import 'package:gym_progression/services/exercise_log_storage.dart';
+import 'package:gym_progression/services/progress_stats.dart';
+import 'package:gym_progression/utils/week.dart';
+import 'package:gym_progression/widgets/celebration.dart';
+import 'package:gym_progression/widgets/weight_progress_chart.dart';
 
 class WorkoutDetailScreen extends StatefulWidget {
-  const WorkoutDetailScreen({super.key, required this.workout});
+  const WorkoutDetailScreen({
+    super.key,
+    required this.workout,
+    required this.profileId,
+  });
 
   final Workout workout;
+  final String profileId;
 
   @override
   State<WorkoutDetailScreen> createState() => _WorkoutDetailScreenState();
@@ -16,8 +26,9 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
   late Workout _workout;
   late final Map<String, TextEditingController> _weightControllers;
   late final Map<String, TextEditingController> _repsControllers;
+  Map<String, double> _bestWeights = {};
 
-  String get _currentWeekKey => _weekKeyFor(DateTime.now());
+  String get _currentWeekKey => weekKeyFor(DateTime.now());
 
   bool get _isCompletedThisWeek =>
       _workout.lastCompletedWeekKey == _currentWeekKey;
@@ -34,6 +45,7 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
       for (final exercise in _workout.exercises)
         exercise.id: TextEditingController(text: exercise.reps),
     };
+    _loadBestWeights();
   }
 
   @override
@@ -101,22 +113,75 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
     Navigator.of(context).pop(updatedWorkout);
   }
 
-  String _weekKeyFor(DateTime date) {
-    final localDate = DateTime(date.year, date.month, date.day);
-    final weekdayOffset = localDate.weekday - DateTime.monday;
-    final monday = localDate.subtract(Duration(days: weekdayOffset));
-    return '${monday.year}-${monday.month.toString().padLeft(2, '0')}-${monday.day.toString().padLeft(2, '0')}';
+  Future<void> _loadBestWeights() async {
+    final logs = await ExerciseLogStorage.getLogsForProfile(widget.profileId);
+    final bestWeights = <String, double>{};
+    for (final log in logs) {
+      final weight = parseMetric(log.weight);
+      final best = bestWeights[log.exerciseName];
+      if (weight != null && (best == null || weight > best)) {
+        bestWeights[log.exerciseName] = weight;
+      }
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _bestWeights = bestWeights);
   }
 
   Future<void> _saveExerciseLog(ExerciseEntry exercise) async {
+    final weightText = _weightControllers[exercise.id]?.text;
+
     try {
+      final previousBest = bestWeight(
+        await ExerciseLogStorage.getLogsForExercise(
+          widget.profileId,
+          exercise.name,
+        ),
+      );
+      final statsBefore = await ProfileStats.load(widget.profileId);
+
       await ExerciseLogStorage.saveLog(
+        profileId: widget.profileId,
         exerciseName: exercise.name,
-        weight: _weightControllers[exercise.id]?.text,
+        weight: weightText,
         reps: _repsControllers[exercise.id]?.text,
       );
 
+      final statsAfter = await ProfileStats.load(widget.profileId);
+      final unlocked = newlyUnlocked(statsBefore, statsAfter);
+      final weight = parseMetric(weightText);
+
       if (!mounted) {
+        return;
+      }
+
+      if (weight != null && (previousBest == null || weight > previousBest)) {
+        setState(() => _bestWeights[exercise.name] = weight);
+      }
+
+      if (previousBest != null && weight != null && weight > previousBest) {
+        await showCelebration(
+          context,
+          icon: Icons.emoji_events_rounded,
+          title: 'New personal record!',
+          message:
+              '${exercise.name}: ${formatNumber(weight)} kg, up from ${formatNumber(previousBest)} kg.',
+          unlocked: unlocked,
+        );
+        return;
+      }
+
+      if (unlocked.isNotEmpty) {
+        await showCelebration(
+          context,
+          icon: unlocked.first.icon,
+          title: 'Log saved',
+          message: 'Saved log for ${exercise.name}.',
+          unlocked: unlocked,
+        );
         return;
       }
 
@@ -138,6 +203,7 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ExerciseHistoryLogsScreen(
+          profileId: widget.profileId,
           exerciseName: exercise.name,
         ),
       ),
@@ -207,9 +273,19 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      exercise.name,
-                      style: Theme.of(context).textTheme.titleMedium,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            exercise.name,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                        if (_bestWeights[exercise.name] != null)
+                          _BestWeightChip(
+                            weight: _bestWeights[exercise.name]!,
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 12),
                     Wrap(
@@ -261,6 +337,37 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BestWeightChip extends StatelessWidget {
+  const _BestWeightChip({required this.weight});
+
+  final double weight;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final recordColor = ChartColors.record(theme.brightness);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: recordColor.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.emoji_events_rounded, size: 16, color: recordColor),
+          const SizedBox(width: 4),
+          Text(
+            'Best ${formatNumber(weight)} kg',
+            style: theme.textTheme.labelMedium,
+          ),
         ],
       ),
     );

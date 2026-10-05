@@ -1,8 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:gym_progression/models/achievement.dart';
+import 'package:gym_progression/models/profile.dart';
 import 'package:gym_progression/models/workout.dart';
+import 'package:gym_progression/screens/clients_screen.dart';
+import 'package:gym_progression/screens/profile_screen.dart';
+import 'package:gym_progression/screens/settings_screen.dart';
 import 'package:gym_progression/screens/workout_detail_screen.dart';
 import 'package:gym_progression/screens/workout_editor_screen.dart';
+import 'package:gym_progression/services/app_settings.dart';
+import 'package:gym_progression/services/completion_storage.dart';
+import 'package:gym_progression/services/profile_storage.dart';
+import 'package:gym_progression/services/progress_stats.dart';
 import 'package:gym_progression/services/workout_storage.dart';
+import 'package:gym_progression/utils/week.dart';
+import 'package:gym_progression/widgets/celebration.dart';
+import 'package:gym_progression/widgets/profile_avatar.dart';
+import 'package:gym_progression/widgets/week_progress_card.dart';
 
 class StartUpApp extends StatefulWidget {
   const StartUpApp({super.key});
@@ -12,22 +25,45 @@ class StartUpApp extends StatefulWidget {
 }
 
 class _StartUpAppState extends State<StartUpApp> {
-  bool _isLoading = false;
+  bool _isLoading = true;
   List<Workout> _workouts = [];
+  Profile? _profile;
+  int _streak = 0;
 
-  String get _currentWeekKey => _weekKeyFor(DateTime.now());
+  String get _currentWeekKey => weekKeyFor(DateTime.now());
+
+  String get _profileId => _profile?.id ?? Profile.ownerId;
 
   @override
   void initState() {
     super.initState();
-    _loadWorkouts();
+    _loadProfile();
+  }
+
+  /// Loads the active profile, and its workouts when the profile changed.
+  /// Without trainer mode the owner is always active.
+  Future<void> _loadProfile() async {
+    final profileId = AppSettings.instance.trainerMode
+        ? await ProfileStorage.loadActiveProfileId()
+        : Profile.ownerId;
+    final profile = await ProfileStorage.loadProfile(profileId);
+    if (!mounted) {
+      return;
+    }
+
+    final profileChanged = profile.id != _profile?.id;
+    setState(() => _profile = profile);
+
+    if (profileChanged) {
+      await _loadWorkouts();
+    }
   }
 
   Future<void> _loadWorkouts() async {
     setState(() => _isLoading = true);
 
     try {
-      final workouts = await WorkoutStorage.loadWorkouts();
+      final workouts = await WorkoutStorage.loadWorkouts(_profileId);
       final normalizedWorkouts =
           workouts.map(_normalizeWorkoutForCurrentWeek).toList();
       if (!mounted) {
@@ -39,7 +75,8 @@ class _StartUpAppState extends State<StartUpApp> {
         _isLoading = false;
       });
 
-      await WorkoutStorage.saveWorkouts(normalizedWorkouts);
+      await WorkoutStorage.saveWorkouts(_profileId, normalizedWorkouts);
+      await _loadStreak();
     } catch (_) {
       if (!mounted) {
         return;
@@ -60,7 +97,7 @@ class _StartUpAppState extends State<StartUpApp> {
       _workouts = sortedWorkouts;
     });
 
-    await WorkoutStorage.saveWorkouts(sortedWorkouts);
+    await WorkoutStorage.saveWorkouts(_profileId, sortedWorkouts);
   }
 
   Workout _normalizeWorkoutForCurrentWeek(Workout workout) {
@@ -114,7 +151,10 @@ class _StartUpAppState extends State<StartUpApp> {
   Future<void> _openWorkout(Workout workout) async {
     final updatedWorkout = await Navigator.of(context).push<Workout>(
       MaterialPageRoute(
-        builder: (_) => WorkoutDetailScreen(workout: workout),
+        builder: (_) => WorkoutDetailScreen(
+          workout: workout,
+          profileId: _profileId,
+        ),
       ),
     );
 
@@ -127,6 +167,80 @@ class _StartUpAppState extends State<StartUpApp> {
         .toList();
 
     await _saveWorkouts(workouts);
+
+    final wasCompleted = _isCompletedThisWeek(workout);
+    final isCompleted = _isCompletedThisWeek(updatedWorkout);
+    if (wasCompleted == isCompleted) {
+      return;
+    }
+
+    final statsBefore = await ProfileStats.load(_profileId);
+    if (isCompleted) {
+      await CompletionStorage.addCompletion(
+        profileId: _profileId,
+        workout: updatedWorkout,
+        weekKey: _currentWeekKey,
+      );
+    } else {
+      await CompletionStorage.removeCompletion(
+        profileId: _profileId,
+        workoutId: updatedWorkout.id,
+        weekKey: _currentWeekKey,
+      );
+    }
+
+    final stats = await ProfileStats.load(_profileId);
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _streak = stats.currentStreak);
+
+    if (isCompleted) {
+      await showCelebration(
+        context,
+        icon: stats.isPerfectWeek
+            ? Icons.workspace_premium_rounded
+            : Icons.local_fire_department_rounded,
+        title: stats.isPerfectWeek ? 'Perfect week!' : 'Workout complete!',
+        message: stats.isPerfectWeek
+            ? 'All ${stats.plannedThisWeek} workouts done this week. ${stats.currentStreak}-week streak and counting.'
+            : '${updatedWorkout.name} done. ${stats.completedThisWeek} of ${stats.plannedThisWeek} this week · ${stats.currentStreak}-week streak.',
+        unlocked: newlyUnlocked(statsBefore, stats),
+      );
+    }
+  }
+
+  Future<void> _loadStreak() async {
+    final stats = await ProfileStats.load(_profileId);
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _streak = stats.currentStreak);
+  }
+
+  Future<void> _openProfile(Profile profile) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ProfileScreen(profile: profile)),
+    );
+    await _loadProfile();
+  }
+
+  Future<void> _openClients() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ClientsScreen(activeProfileId: _profileId),
+      ),
+    );
+    await _loadProfile();
+  }
+
+  Future<void> _openSettings() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+    );
+    await _loadProfile();
   }
 
   String _subtitleForWorkout(Workout workout) {
@@ -148,18 +262,38 @@ class _StartUpAppState extends State<StartUpApp> {
     return '$day/$month/$year';
   }
 
-  String _weekKeyFor(DateTime date) {
-    final localDate = DateTime(date.year, date.month, date.day);
-    final weekdayOffset = localDate.weekday - DateTime.monday;
-    final monday = localDate.subtract(Duration(days: weekdayOffset));
-    return '${monday.year}-${monday.month.toString().padLeft(2, '0')}-${monday.day.toString().padLeft(2, '0')}';
-  }
-
   @override
   Widget build(BuildContext context) {
+    final profile = _profile;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('My Workouts'),
+        leading: profile == null
+            ? null
+            : IconButton(
+                onPressed: () => _openProfile(profile),
+                icon: Hero(
+                  tag: 'avatar-${profile.id}',
+                  child: ProfileAvatar(profile: profile, radius: 16),
+                ),
+                tooltip: 'Profile',
+              ),
+        title: Text(
+          profile == null || profile.isOwner ? 'My Workouts' : profile.name,
+        ),
+        actions: [
+          if (AppSettings.instance.trainerMode)
+            IconButton(
+              onPressed: _openClients,
+              icon: const Icon(Icons.groups_outlined),
+              tooltip: 'Clients',
+            ),
+          IconButton(
+            onPressed: _openSettings,
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openNewWorkout,
@@ -206,9 +340,18 @@ class _StartUpAppState extends State<StartUpApp> {
                   onRefresh: _loadWorkouts,
                   child: ListView.builder(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-                    itemCount: _workouts.length,
+                    itemCount: _workouts.length + 1,
                     itemBuilder: (context, index) {
-                      final workout = _workouts[index];
+                      if (index == 0) {
+                        return WeekProgressCard(
+                          completed:
+                              _workouts.where(_isCompletedThisWeek).length,
+                          planned: _workouts.length,
+                          streak: _streak,
+                        );
+                      }
+
+                      final workout = _workouts[index - 1];
                       final isCompleted = _isCompletedThisWeek(workout);
                       return Card(
                         color:

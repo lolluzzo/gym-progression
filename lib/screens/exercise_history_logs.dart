@@ -1,9 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:gym_progression/services/exercise_log_storage.dart';
+import 'package:gym_progression/services/progress_stats.dart';
+import 'package:gym_progression/widgets/dialogs.dart';
+import 'package:gym_progression/widgets/weight_progress_chart.dart';
 
 class ExerciseHistoryLogsScreen extends StatefulWidget {
-  const ExerciseHistoryLogsScreen({super.key, required this.exerciseName});
+  const ExerciseHistoryLogsScreen({
+    super.key,
+    required this.profileId,
+    required this.exerciseName,
+  });
 
+  final String profileId;
   final String exerciseName;
 
   @override
@@ -17,15 +25,51 @@ class _ExerciseHistoryLogsScreenState extends State<ExerciseHistoryLogsScreen> {
   @override
   void initState() {
     super.initState();
-    _logsFuture = ExerciseLogStorage.getLogsForExercise(widget.exerciseName);
+    _logsFuture = _loadLogs();
+  }
+
+  Future<List<ExerciseLogEntry>> _loadLogs() {
+    return ExerciseLogStorage.getLogsForExercise(
+      widget.profileId,
+      widget.exerciseName,
+    );
   }
 
   Future<void> _refreshLogs() async {
     setState(() {
-      _logsFuture = ExerciseLogStorage.getLogsForExercise(widget.exerciseName);
+      _logsFuture = _loadLogs();
     });
 
     await _logsFuture;
+  }
+
+  Future<void> _deleteLog(ExerciseLogEntry entry) async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Delete log?',
+      message:
+          'The log from ${_formatLoggedAt(entry.loggedAt)} will be removed.',
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await ExerciseLogStorage.deleteLog(entry.id);
+      if (!mounted) {
+        return;
+      }
+
+      await _refreshLogs();
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to delete the log.')),
+      );
+    }
   }
 
   String _formatMetric(String? value, {String suffix = ''}) {
@@ -84,9 +128,85 @@ class _ExerciseHistoryLogsScreenState extends State<ExerciseHistoryLogsScreen> {
     );
   }
 
+  /// Best / latest / PR tiles and the weight chart, above the log list.
+  Widget _buildSummary(List<ExerciseLogEntry> logs, Set<int> recordIds) {
+    final theme = Theme.of(context);
+    // Logs arrive latest first; the chart reads oldest first.
+    final weightedLogs = logs.reversed
+        .where((log) => parseMetric(log.weight) != null)
+        .toList();
+    final best = bestWeight(logs);
+    final latest =
+        weightedLogs.isEmpty ? null : parseMetric(weightedLogs.last.weight);
+
+    String weightLabel(double? value) =>
+        value == null ? 'Not set' : '${formatNumber(value)} kg';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _MetricTile(label: 'Best', value: weightLabel(best)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _MetricTile(label: 'Latest', value: weightLabel(latest)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _MetricTile(label: 'PRs', value: '${recordIds.length}'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Card(
+          color: theme.colorScheme.surfaceContainerLow,
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 20, 16),
+            child: weightedLogs.length >= 2
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Weight progress', style: theme.textTheme.titleMedium),
+                      const SizedBox(height: 16),
+                      WeightProgressChart(
+                        logs: weightedLogs,
+                        recordIds: recordIds,
+                      ),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      Icon(
+                        Icons.show_chart_rounded,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'Save at least 2 logs with a weight to see your progress chart.',
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          '${logs.length} saved ${logs.length == 1 ? 'entry' : 'entries'} · latest first',
+          style: theme.textTheme.bodySmall,
+        ),
+      ],
+    );
+  }
+
   Widget _buildEntryCard({
     required ExerciseLogEntry entry,
     required int index,
+    required bool isRecord,
   }) {
     final theme = Theme.of(context);
 
@@ -97,15 +217,24 @@ class _ExerciseHistoryLogsScreenState extends State<ExerciseHistoryLogsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
                   'Log #${index + 1}',
                   style: theme.textTheme.titleMedium,
                 ),
+                if (isRecord) ...[
+                  const SizedBox(width: 8),
+                  const _RecordChip(),
+                ],
+                const Spacer(),
                 Text(
                   _formatLoggedAt(entry.loggedAt),
                   style: theme.textTheme.bodySmall,
+                ),
+                IconButton(
+                  onPressed: () => _deleteLog(entry),
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: 'Delete log',
                 ),
               ],
             ),
@@ -176,6 +305,8 @@ class _ExerciseHistoryLogsScreenState extends State<ExerciseHistoryLogsScreen> {
             );
           }
 
+          final recordIds = personalRecordIds(logs);
+
           return RefreshIndicator(
             onRefresh: _refreshLogs,
             child: ListView.separated(
@@ -185,37 +316,45 @@ class _ExerciseHistoryLogsScreenState extends State<ExerciseHistoryLogsScreen> {
               separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
                 if (index == 0) {
-                  return Card(
-                    color: Theme.of(context).colorScheme.primaryContainer,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Exercise history',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${logs.length} saved ${logs.length == 1 ? 'entry' : 'entries'}',
-                          ),
-                          const SizedBox(height: 4),
-                          const Text('Sorted from latest to oldest.'),
-                        ],
-                      ),
-                    ),
-                  );
+                  return _buildSummary(logs, recordIds);
                 }
 
+                final entry = logs[index - 1];
                 return _buildEntryCard(
-                  entry: logs[index - 1],
+                  entry: entry,
                   index: index - 1,
+                  isRecord: recordIds.contains(entry.id),
                 );
               },
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _RecordChip extends StatelessWidget {
+  const _RecordChip();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final recordColor = ChartColors.record(theme.brightness);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: recordColor.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.emoji_events_rounded, size: 14, color: recordColor),
+          const SizedBox(width: 4),
+          Text('PR', style: theme.textTheme.labelMedium),
+        ],
       ),
     );
   }
