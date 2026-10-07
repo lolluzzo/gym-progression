@@ -4,6 +4,8 @@ class ExerciseEntry {
     required this.name,
     this.weight = '',
     this.reps = '',
+    this.alternatives = const [],
+    this.chosenName,
   });
 
   final String id;
@@ -11,17 +13,38 @@ class ExerciseEntry {
   final String weight;
   final String reps;
 
+  /// Other forms of the exercise, like "Dumbbell press" for "Bench press".
+  /// Each form keeps its own logs.
+  final List<String> alternatives;
+
+  /// The form picked last time: [name] or one of [alternatives].
+  final String? chosenName;
+
+  /// [name] followed by its [alternatives].
+  List<String> get forms => [name, ...alternatives];
+
+  /// The form being trained. Falls back to [name] when the chosen
+  /// alternative was removed.
+  String get activeName {
+    final chosen = chosenName;
+    return chosen != null && alternatives.contains(chosen) ? chosen : name;
+  }
+
   ExerciseEntry copyWith({
     String? id,
     String? name,
     String? weight,
     String? reps,
+    List<String>? alternatives,
+    String? chosenName,
   }) {
     return ExerciseEntry(
       id: id ?? this.id,
       name: name ?? this.name,
       weight: weight ?? this.weight,
       reps: reps ?? this.reps,
+      alternatives: alternatives ?? this.alternatives,
+      chosenName: chosenName ?? this.chosenName,
     );
   }
 
@@ -31,6 +54,8 @@ class ExerciseEntry {
       'name': name,
       'weight': weight,
       'reps': reps,
+      'alternatives': alternatives,
+      'chosenName': chosenName,
     };
   }
 
@@ -40,6 +65,9 @@ class ExerciseEntry {
       name: json['name'] as String,
       weight: (json['weight'] as String?) ?? '',
       reps: (json['reps'] as String?) ?? '',
+      alternatives:
+          ((json['alternatives'] as List<dynamic>?) ?? const []).cast<String>(),
+      chosenName: json['chosenName'] as String?,
     );
   }
 }

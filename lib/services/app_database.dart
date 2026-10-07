@@ -15,7 +15,7 @@ class AppDatabase {
 
     return openDatabase(
       fullPath,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await _ensureSchema(db);
       },
@@ -25,6 +25,13 @@ class AppDatabase {
           await db.execute(
             "ALTER TABLE $logsTable ADD COLUMN profile_id TEXT NOT NULL DEFAULT '${Profile.ownerId}'",
           );
+        }
+        // v3: logs remember their workout, so history can group them into
+        // sessions. Existing logs have no workout.
+        if (oldVersion < 3) {
+          await db.execute('ALTER TABLE $logsTable ADD COLUMN workout_id TEXT');
+          await db
+              .execute('ALTER TABLE $logsTable ADD COLUMN workout_name TEXT');
         }
       },
       onOpen: (db) async {
@@ -41,7 +48,9 @@ class AppDatabase {
         weight TEXT,
         reps TEXT,
         logged_at TEXT NOT NULL,
-        profile_id TEXT NOT NULL DEFAULT '${Profile.ownerId}'
+        profile_id TEXT NOT NULL DEFAULT '${Profile.ownerId}',
+        workout_id TEXT,
+        workout_name TEXT
       )
     ''');
     await db.execute('''

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:gym_progression/models/workout.dart';
+import 'package:gym_progression/widgets/dialogs.dart';
 
 class WorkoutEditorScreen extends StatefulWidget {
   const WorkoutEditorScreen({super.key, this.workout});
@@ -14,6 +15,8 @@ class _WorkoutEditorScreenState extends State<WorkoutEditorScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final List<TextEditingController> _exerciseControllers = [];
+  // Alternatives of each exercise, in the same order as the controllers.
+  final List<List<String>> _alternatives = [];
 
   bool get _isEditing => widget.workout != null;
 
@@ -28,6 +31,7 @@ class _WorkoutEditorScreenState extends State<WorkoutEditorScreen> {
     } else {
       for (final exercise in exercises) {
         _exerciseControllers.add(TextEditingController(text: exercise.name));
+        _alternatives.add([...exercise.alternatives]);
       }
     }
   }
@@ -44,6 +48,7 @@ class _WorkoutEditorScreenState extends State<WorkoutEditorScreen> {
   void _addExerciseField() {
     setState(() {
       _exerciseControllers.add(TextEditingController());
+      _alternatives.add([]);
     });
   }
 
@@ -55,7 +60,26 @@ class _WorkoutEditorScreenState extends State<WorkoutEditorScreen> {
     setState(() {
       final controller = _exerciseControllers.removeAt(index);
       controller.dispose();
+      _alternatives.removeAt(index);
     });
+  }
+
+  Future<void> _addAlternative(int index) async {
+    final exerciseName = _exerciseControllers[index].text.trim();
+    final name = await showNameDialog(
+      context,
+      title: exerciseName.isEmpty
+          ? 'Add alternative'
+          : 'Alternative to $exerciseName',
+    );
+    if (!mounted ||
+        name == null ||
+        name == exerciseName ||
+        _alternatives[index].contains(name)) {
+      return;
+    }
+
+    setState(() => _alternatives[index].add(name));
   }
 
   void _saveWorkout() {
@@ -63,12 +87,15 @@ class _WorkoutEditorScreenState extends State<WorkoutEditorScreen> {
       return;
     }
 
-    final exerciseNames = _exerciseControllers
-        .map((controller) => controller.text.trim())
-        .where((name) => name.isNotEmpty)
-        .toList();
+    final rows = [
+      for (var i = 0; i < _exerciseControllers.length; i++)
+        (
+          name: _exerciseControllers[i].text.trim(),
+          alternatives: _alternatives[i],
+        ),
+    ].where((row) => row.name.isNotEmpty).toList();
 
-    if (exerciseNames.isEmpty) {
+    if (rows.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Add at least one exercise.')),
       );
@@ -76,7 +103,7 @@ class _WorkoutEditorScreenState extends State<WorkoutEditorScreen> {
     }
 
     final previousExercises = widget.workout?.exercises ?? [];
-    final exercises = exerciseNames.asMap().entries.map((entry) {
+    final exercises = rows.asMap().entries.map((entry) {
       final existingExercise = entry.key < previousExercises.length
           ? previousExercises[entry.key]
           : null;
@@ -84,9 +111,11 @@ class _WorkoutEditorScreenState extends State<WorkoutEditorScreen> {
       return ExerciseEntry(
         id: existingExercise?.id ??
             '${DateTime.now().microsecondsSinceEpoch}_${entry.key}',
-        name: entry.value,
+        name: entry.value.name,
         weight: existingExercise?.weight ?? '',
         reps: existingExercise?.reps ?? '',
+        alternatives: entry.value.alternatives,
+        chosenName: existingExercise?.chosenName,
       );
     }).toList();
 
@@ -149,28 +178,56 @@ class _WorkoutEditorScreenState extends State<WorkoutEditorScreen> {
             const SizedBox(height: 8),
             for (var i = 0; i < _exerciseControllers.length; i++)
               Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Row(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: TextFormField(
-                        controller: _exerciseControllers[i],
-                        decoration: InputDecoration(
-                          labelText: 'Exercise ${i + 1}',
-                          border: const OutlineInputBorder(),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _exerciseControllers[i],
+                            decoration: InputDecoration(
+                              labelText: 'Exercise ${i + 1}',
+                              border: const OutlineInputBorder(),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.trim().isEmpty) {
+                                return 'Enter an exercise name.';
+                              }
+                              return null;
+                            },
+                          ),
                         ),
-                        validator: (value) {
-                          if (value == null || value.trim().isEmpty) {
-                            return 'Enter an exercise name.';
-                          }
-                          return null;
-                        },
-                      ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          onPressed: () => _removeExerciseField(i),
+                          icon: const Icon(Icons.delete_outline),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      onPressed: () => _removeExerciseField(i),
-                      icon: const Icon(Icons.delete_outline),
+                    const SizedBox(height: 8),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          for (final alternative in _alternatives[i])
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: InputChip(
+                                label: Text(alternative),
+                                onDeleted: () => setState(
+                                  () => _alternatives[i].remove(alternative),
+                                ),
+                              ),
+                            ),
+                          ActionChip(
+                            avatar: const Icon(Icons.add),
+                            label: const Text('Alternative'),
+                            onPressed: () => _addAlternative(i),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),

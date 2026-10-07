@@ -8,6 +8,8 @@ class ExerciseLogEntry {
     required this.loggedAt,
     this.weight,
     this.reps,
+    this.workoutId,
+    this.workoutName,
   });
 
   final int id;
@@ -15,6 +17,11 @@ class ExerciseLogEntry {
   final String? weight;
   final String? reps;
   final DateTime loggedAt;
+
+  /// The workout the log was saved from. Null for logs saved before logs
+  /// remembered their workout.
+  final String? workoutId;
+  final String? workoutName;
 
   factory ExerciseLogEntry.fromMap(Map<String, Object?> map) {
     String? asText(Object? value) {
@@ -31,6 +38,8 @@ class ExerciseLogEntry {
       weight: asText(map['weight']),
       reps: asText(map['reps']),
       loggedAt: DateTime.parse(map['logged_at'] as String),
+      workoutId: map['workout_id'] as String?,
+      workoutName: map['workout_name'] as String?,
     );
   }
 }
@@ -47,6 +56,8 @@ class ExerciseLogStorage {
     required String exerciseName,
     String? weight,
     String? reps,
+    String? workoutId,
+    String? workoutName,
   }) async {
     final db = await _openDatabase();
     try {
@@ -56,6 +67,8 @@ class ExerciseLogStorage {
         'weight': _cleanValue(weight),
         'reps': _cleanValue(reps),
         'logged_at': DateTime.now().toIso8601String(),
+        'workout_id': workoutId,
+        'workout_name': workoutName,
       });
     } finally {
       await db.close();

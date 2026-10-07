@@ -113,6 +113,17 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
     Navigator.of(context).pop(updatedWorkout);
   }
 
+  void _chooseForm(ExerciseEntry exercise, String form) {
+    setState(() {
+      _workout = _workout.copyWith(
+        exercises: [
+          for (final item in _workout.exercises)
+            item.id == exercise.id ? item.copyWith(chosenName: form) : item,
+        ],
+      );
+    });
+  }
+
   Future<void> _loadBestWeights() async {
     final logs = await ExerciseLogStorage.getLogsForProfile(widget.profileId);
     final bestWeights = <String, double>{};
@@ -133,21 +144,24 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
 
   Future<void> _saveExerciseLog(ExerciseEntry exercise) async {
     final weightText = _weightControllers[exercise.id]?.text;
+    final exerciseName = exercise.activeName;
 
     try {
       final previousBest = bestWeight(
         await ExerciseLogStorage.getLogsForExercise(
           widget.profileId,
-          exercise.name,
+          exerciseName,
         ),
       );
       final statsBefore = await ProfileStats.load(widget.profileId);
 
       await ExerciseLogStorage.saveLog(
         profileId: widget.profileId,
-        exerciseName: exercise.name,
+        exerciseName: exerciseName,
         weight: weightText,
         reps: _repsControllers[exercise.id]?.text,
+        workoutId: _workout.id,
+        workoutName: _workout.name,
       );
 
       final statsAfter = await ProfileStats.load(widget.profileId);
@@ -159,7 +173,7 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
       }
 
       if (weight != null && (previousBest == null || weight > previousBest)) {
-        setState(() => _bestWeights[exercise.name] = weight);
+        setState(() => _bestWeights[exerciseName] = weight);
       }
 
       if (previousBest != null && weight != null && weight > previousBest) {
@@ -168,7 +182,7 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
           icon: Icons.emoji_events_rounded,
           title: 'New personal record!',
           message:
-              '${exercise.name}: ${formatNumber(weight)} kg, up from ${formatNumber(previousBest)} kg.',
+              '$exerciseName: ${formatNumber(weight)} kg, up from ${formatNumber(previousBest)} kg.',
           unlocked: unlocked,
         );
         return;
@@ -179,14 +193,14 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
           context,
           icon: unlocked.first.icon,
           title: 'Log saved',
-          message: 'Saved log for ${exercise.name}.',
+          message: 'Saved log for $exerciseName.',
           unlocked: unlocked,
         );
         return;
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Saved log for ${exercise.name}.')),
+        SnackBar(content: Text('Saved log for $exerciseName.')),
       );
     } catch (_) {
       if (!mounted) {
@@ -204,7 +218,7 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
       MaterialPageRoute(
         builder: (_) => ExerciseHistoryLogsScreen(
           profileId: widget.profileId,
-          exerciseName: exercise.name,
+          exerciseName: exercise.activeName,
         ),
       ),
     );
@@ -277,16 +291,36 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
                       children: [
                         Expanded(
                           child: Text(
-                            exercise.name,
+                            exercise.activeName,
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                         ),
-                        if (_bestWeights[exercise.name] != null)
+                        if (_bestWeights[exercise.activeName] != null)
                           _BestWeightChip(
-                            weight: _bestWeights[exercise.name]!,
+                            weight: _bestWeights[exercise.activeName]!,
                           ),
                       ],
                     ),
+                    if (exercise.alternatives.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            for (final form in exercise.forms)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: ChoiceChip(
+                                  label: Text(form),
+                                  selected: form == exercise.activeName,
+                                  onSelected: (_) =>
+                                      _chooseForm(exercise, form),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     Wrap(
                       spacing: 12,
