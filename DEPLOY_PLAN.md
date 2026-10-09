@@ -94,7 +94,8 @@ New versions install over the old one and keep the data, as long as they're sign
 **iOS with a free Apple ID**
 - **Your own iPhone, from the Mac:**
   1. Open `ios/Runner.xcworkspace` in Xcode.
-  2. Under Signing & Capabilities, set Team to your Personal Team.
+  2. Put your Team ID in `ios/Flutter/Signing.xcconfig`, which is git-ignored: `DEVELOPMENT_TEAM = <team id>`.
+     Don't set the Team under Signing & Capabilities: Xcode saves it in `project.pbxproj`, which is committed.
   3. Connect the phone and run `flutter run --release`.
   4. On the iPhone, enable Developer Mode (Settings → Privacy & Security).
   5. Trust the certificate under Settings → General → VPN & Device Management.

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gym_progression/models/workout.dart';
@@ -9,7 +11,7 @@ import 'package:gym_progression/services/exercise_log_storage.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-const dbDir = '/tmp/claude-1000/-home-lorenzo-tricarico-Projects-Personal-gym-progression/75b4210b-4a70-4de3-bed4-ebf86d590a7b/scratchpad/db';
+final dbDir = Directory.systemTemp.createTempSync('gym_progression_smoke').path;
 
 Workout workout() => Workout(
       id: 'w1',

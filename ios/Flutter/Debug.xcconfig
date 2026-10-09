@@ -1,1 +1,3 @@
 #include "Generated.xcconfig"
+// Optional, git-ignored: DEVELOPMENT_TEAM for signing in Xcode. See DEPLOY_PLAN.md.
+#include? "Signing.xcconfig"
