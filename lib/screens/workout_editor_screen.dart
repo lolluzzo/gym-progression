@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:gym_progression/models/workout.dart';
+import 'package:gym_progression/utils/exercise_name.dart';
 import 'package:gym_progression/widgets/dialogs.dart';
 
 class WorkoutEditorScreen extends StatefulWidget {
@@ -15,7 +16,9 @@ class _WorkoutEditorScreenState extends State<WorkoutEditorScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final List<TextEditingController> _exerciseControllers = [];
-  // Alternatives of each exercise, in the same order as the controllers.
+  // Id and alternatives of each exercise, in the same order as the
+  // controllers.
+  final List<String> _exerciseIds = [];
   final List<List<String>> _alternatives = [];
 
   bool get _isEditing => widget.workout != null;
@@ -31,6 +34,7 @@ class _WorkoutEditorScreenState extends State<WorkoutEditorScreen> {
     } else {
       for (final exercise in exercises) {
         _exerciseControllers.add(TextEditingController(text: exercise.name));
+        _exerciseIds.add(exercise.id);
         _alternatives.add([...exercise.alternatives]);
       }
     }
@@ -48,6 +52,9 @@ class _WorkoutEditorScreenState extends State<WorkoutEditorScreen> {
   void _addExerciseField() {
     setState(() {
       _exerciseControllers.add(TextEditingController());
+      _exerciseIds.add(
+        '${DateTime.now().microsecondsSinceEpoch}_${_exerciseIds.length}',
+      );
       _alternatives.add([]);
     });
   }
@@ -60,6 +67,7 @@ class _WorkoutEditorScreenState extends State<WorkoutEditorScreen> {
     setState(() {
       final controller = _exerciseControllers.removeAt(index);
       controller.dispose();
+      _exerciseIds.removeAt(index);
       _alternatives.removeAt(index);
     });
   }
@@ -74,8 +82,10 @@ class _WorkoutEditorScreenState extends State<WorkoutEditorScreen> {
     );
     if (!mounted ||
         name == null ||
-        name == exerciseName ||
-        _alternatives[index].contains(name)) {
+        exerciseKey(name) == exerciseKey(exerciseName) ||
+        _alternatives[index].any(
+          (alternative) => exerciseKey(alternative) == exerciseKey(name),
+        )) {
       return;
     }
 
@@ -90,6 +100,7 @@ class _WorkoutEditorScreenState extends State<WorkoutEditorScreen> {
     final rows = [
       for (var i = 0; i < _exerciseControllers.length; i++)
         (
+          id: _exerciseIds[i],
           name: _exerciseControllers[i].text.trim(),
           alternatives: _alternatives[i],
         ),
@@ -102,19 +113,19 @@ class _WorkoutEditorScreenState extends State<WorkoutEditorScreen> {
       return;
     }
 
-    final previousExercises = widget.workout?.exercises ?? [];
-    final exercises = rows.asMap().entries.map((entry) {
-      final existingExercise = entry.key < previousExercises.length
-          ? previousExercises[entry.key]
-          : null;
+    final previousExercises = {
+      for (final exercise in widget.workout?.exercises ?? <ExerciseEntry>[])
+        exercise.id: exercise,
+    };
+    final exercises = rows.map((row) {
+      final existingExercise = previousExercises[row.id];
 
       return ExerciseEntry(
-        id: existingExercise?.id ??
-            '${DateTime.now().microsecondsSinceEpoch}_${entry.key}',
-        name: entry.value.name,
+        id: row.id,
+        name: row.name,
         weight: existingExercise?.weight ?? '',
         reps: existingExercise?.reps ?? '',
-        alternatives: entry.value.alternatives,
+        alternatives: row.alternatives,
         chosenName: existingExercise?.chosenName,
       );
     }).toList();

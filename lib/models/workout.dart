@@ -1,3 +1,5 @@
+import 'package:gym_progression/utils/week.dart';
+
 class ExerciseEntry {
   ExerciseEntry({
     required this.id,
@@ -103,6 +105,29 @@ class Workout {
       lastCompletedWeekKey: clearCompletedWeek
           ? null
           : lastCompletedWeekKey ?? this.lastCompletedWeekKey,
+    );
+  }
+
+  /// The workout as it starts the week [weekKey]. A completion from an
+  /// earlier week is cleared, and so are the exercise values when the
+  /// workout was last changed in an earlier week. [updatedAt] stays, so the
+  /// home list keeps its order.
+  Workout forWeek(String weekKey) {
+    final completedEarlier =
+        lastCompletedWeekKey != null && lastCompletedWeekKey != weekKey;
+    final changedEarlier = weekKeyFor(updatedAt) != weekKey;
+    if (!completedEarlier && !changedEarlier) {
+      return this;
+    }
+
+    return copyWith(
+      exercises: changedEarlier
+          ? [
+              for (final exercise in exercises)
+                exercise.copyWith(weight: '', reps: ''),
+            ]
+          : null,
+      clearCompletedWeek: completedEarlier,
     );
   }
 

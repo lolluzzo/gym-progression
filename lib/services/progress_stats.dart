@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:gym_progression/services/completion_storage.dart';
 import 'package:gym_progression/services/exercise_log_storage.dart';
 import 'package:gym_progression/services/workout_storage.dart';
+import 'package:gym_progression/utils/exercise_name.dart';
 import 'package:gym_progression/utils/week.dart';
 
 final RegExp _numberPattern = RegExp(r'\d+(?:[.,]\d+)?');
@@ -50,12 +51,13 @@ Set<int> personalRecordIds(List<ExerciseLogEntry> logs) {
       continue;
     }
 
-    final best = bestByExercise[log.exerciseName];
+    final key = exerciseKey(log.exerciseName);
+    final best = bestByExercise[key];
     if (best != null && weight > best) {
       recordIds.add(log.id);
     }
     if (best == null || weight > best) {
-      bestByExercise[log.exerciseName] = weight;
+      bestByExercise[key] = weight;
     }
   }
 

@@ -11,12 +11,16 @@ import 'package:gym_progression/screens/workout_detail_screen.dart';
 import 'package:gym_progression/screens/workout_editor_screen.dart';
 import 'package:gym_progression/services/app_settings.dart';
 import 'package:gym_progression/services/completion_storage.dart';
+import 'package:gym_progression/services/exercise_links.dart';
+import 'package:gym_progression/services/exercise_log_storage.dart';
 import 'package:gym_progression/services/profile_storage.dart';
 import 'package:gym_progression/services/progress_stats.dart';
 import 'package:gym_progression/services/shared_text.dart';
 import 'package:gym_progression/services/workout_storage.dart';
+import 'package:gym_progression/utils/exercise_name.dart';
 import 'package:gym_progression/utils/week.dart';
 import 'package:gym_progression/widgets/celebration.dart';
+import 'package:gym_progression/widgets/dialogs.dart';
 import 'package:gym_progression/widgets/profile_avatar.dart';
 import 'package:gym_progression/widgets/week_progress_card.dart';
 
@@ -74,8 +78,9 @@ class _StartUpAppState extends State<StartUpApp> {
 
     try {
       final workouts = await WorkoutStorage.loadWorkouts(_profileId);
-      final normalizedWorkouts =
-          workouts.map(_normalizeWorkoutForCurrentWeek).toList();
+      final normalizedWorkouts = workouts
+          .map((workout) => workout.forWeek(_currentWeekKey))
+          .toList();
       if (!mounted) {
         return;
       }
@@ -108,18 +113,6 @@ class _StartUpAppState extends State<StartUpApp> {
     });
 
     await WorkoutStorage.saveWorkouts(_profileId, sortedWorkouts);
-  }
-
-  Workout _normalizeWorkoutForCurrentWeek(Workout workout) {
-    if (workout.lastCompletedWeekKey == null) {
-      return workout;
-    }
-
-    if (workout.lastCompletedWeekKey == _currentWeekKey) {
-      return workout;
-    }
-
-    return workout.copyWith(clearCompletedWeek: true);
   }
 
   bool _isCompletedThisWeek(Workout workout) {
@@ -171,7 +164,9 @@ class _StartUpAppState extends State<StartUpApp> {
   Future<void> _editWorkout(Workout workout) async {
     final updatedWorkout = await Navigator.of(context).push<Workout>(
       MaterialPageRoute(
-        builder: (_) => WorkoutEditorScreen(workout: workout),
+        // The week may have changed since the workouts loaded.
+        builder: (_) =>
+            WorkoutEditorScreen(workout: workout.forWeek(_currentWeekKey)),
       ),
     );
 
@@ -184,13 +179,67 @@ class _StartUpAppState extends State<StartUpApp> {
         .toList();
 
     await _saveWorkouts(workouts);
+    await _offerToMoveLogs(renamedExercises(workout, updatedWorkout));
+  }
+
+  /// Offers to move the logs of renamed exercises to their new names. A
+  /// name without logs is skipped, and so is a name another workout still
+  /// uses: its logs aren't orphaned.
+  Future<void> _offerToMoveLogs(
+    List<({String from, String to})> renames,
+  ) async {
+    final usedKeys = exerciseKeysIn(_workouts);
+    final moves = <({String from, String to, int count})>[];
+    for (final rename in renames) {
+      if (usedKeys.contains(exerciseKey(rename.from))) {
+        continue;
+      }
+
+      final logs =
+          await ExerciseLogStorage.getLogsForExercise(_profileId, rename.from);
+      if (logs.isNotEmpty) {
+        moves.add((from: rename.from, to: rename.to, count: logs.length));
+      }
+    }
+
+    if (moves.isEmpty || !mounted) {
+      return;
+    }
+
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Move logs to the new names?',
+      message: moves
+          .map((move) =>
+              '${move.from} → ${move.to} · ${move.count} ${move.count == 1 ? 'log' : 'logs'}')
+          .join('\n'),
+      confirmLabel: 'Move logs',
+      cancelLabel: 'Keep old names',
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      for (final move in moves) {
+        await ExerciseLogStorage.renameExercise(_profileId, move.from, move.to);
+      }
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to move the logs.')),
+      );
+    }
   }
 
   Future<void> _openWorkout(Workout workout) async {
     final updatedWorkout = await Navigator.of(context).push<Workout>(
       MaterialPageRoute(
         builder: (_) => WorkoutDetailScreen(
-          workout: workout,
+          workout: workout.forWeek(_currentWeekKey),
           profileId: _profileId,
         ),
       ),

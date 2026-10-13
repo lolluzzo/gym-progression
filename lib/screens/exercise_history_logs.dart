@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:gym_progression/services/exercise_log_storage.dart';
 import 'package:gym_progression/services/progress_stats.dart';
+import 'package:gym_progression/services/workout_storage.dart';
+import 'package:gym_progression/utils/exercise_name.dart';
 import 'package:gym_progression/widgets/dialogs.dart';
 import 'package:gym_progression/widgets/weight_progress_chart.dart';
 
@@ -19,8 +21,11 @@ class ExerciseHistoryLogsScreen extends StatefulWidget {
       _ExerciseHistoryLogsScreenState();
 }
 
+enum _LogsAction { move, deleteAll }
+
 class _ExerciseHistoryLogsScreenState extends State<ExerciseHistoryLogsScreen> {
   late Future<List<ExerciseLogEntry>> _logsFuture;
+  bool _hasLogs = false;
 
   @override
   void initState() {
@@ -28,11 +33,16 @@ class _ExerciseHistoryLogsScreenState extends State<ExerciseHistoryLogsScreen> {
     _logsFuture = _loadLogs();
   }
 
-  Future<List<ExerciseLogEntry>> _loadLogs() {
-    return ExerciseLogStorage.getLogsForExercise(
+  Future<List<ExerciseLogEntry>> _loadLogs() async {
+    final logs = await ExerciseLogStorage.getLogsForExercise(
       widget.profileId,
       widget.exerciseName,
     );
+    if (mounted) {
+      setState(() => _hasLogs = logs.isNotEmpty);
+    }
+
+    return logs;
   }
 
   Future<void> _refreshLogs() async {
@@ -68,6 +78,138 @@ class _ExerciseHistoryLogsScreenState extends State<ExerciseHistoryLogsScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Unable to delete the log.')),
+      );
+    }
+  }
+
+  String _logCount(int count) => count == 1 ? '1 log' : '$count logs';
+
+  /// Moves every log to an exercise of the profile's workouts, then closes
+  /// the screen.
+  Future<void> _moveLogs() async {
+    final currentKey = exerciseKey(widget.exerciseName);
+    final workouts = await WorkoutStorage.loadWorkouts(widget.profileId);
+    final groups = [
+      for (final workout in workouts)
+        (
+          workout: workout.name,
+          forms: [
+            for (final exercise in workout.exercises)
+              for (final form in exercise.forms)
+                if (exerciseKey(form) != currentKey) form,
+          ],
+        ),
+    ].where((group) => group.forms.isNotEmpty).toList();
+    if (!mounted) {
+      return;
+    }
+
+    if (groups.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No other exercises in your workouts.')),
+      );
+      return;
+    }
+
+    final target = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.only(bottom: 16),
+        children: [
+          for (final group in groups) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: Text(
+                group.workout,
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+            ),
+            for (final form in group.forms)
+              ListTile(
+                title: Text(form),
+                onTap: () => Navigator.of(context).pop(form),
+              ),
+          ],
+        ],
+      ),
+    );
+    if (target == null || !mounted) {
+      return;
+    }
+
+    final count = (await _logsFuture).length;
+    if (!mounted) {
+      return;
+    }
+
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Move logs to $target?',
+      message:
+          '${_logCount(count)} of ${widget.exerciseName} will join the history of $target.',
+      confirmLabel: 'Move logs',
+    );
+    if (!confirmed || !mounted) {
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final moved = await ExerciseLogStorage.renameExercise(
+        widget.profileId,
+        widget.exerciseName,
+        target,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      Navigator.of(context).pop();
+      messenger.showSnackBar(
+        SnackBar(content: Text('Moved ${_logCount(moved)} to $target.')),
+      );
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Unable to move the logs.')),
+      );
+    }
+  }
+
+  Future<void> _deleteAllLogs() async {
+    final count = (await _logsFuture).length;
+    if (!mounted) {
+      return;
+    }
+
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Delete all logs?',
+      message:
+          'All ${_logCount(count)} of ${widget.exerciseName} will be removed.',
+    );
+    if (!confirmed || !mounted) {
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final deleted = await ExerciseLogStorage.deleteLogsForExercise(
+        widget.profileId,
+        widget.exerciseName,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      Navigator.of(context).pop();
+      messenger.showSnackBar(
+        SnackBar(content: Text('Deleted ${_logCount(deleted)}.')),
+      );
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Unable to delete the logs.')),
       );
     }
   }
@@ -267,6 +409,25 @@ class _ExerciseHistoryLogsScreenState extends State<ExerciseHistoryLogsScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.exerciseName),
+        actions: [
+          if (_hasLogs)
+            PopupMenuButton<_LogsAction>(
+              onSelected: (action) => switch (action) {
+                _LogsAction.move => _moveLogs(),
+                _LogsAction.deleteAll => _deleteAllLogs(),
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: _LogsAction.move,
+                  child: Text('Move logs to…'),
+                ),
+                PopupMenuItem(
+                  value: _LogsAction.deleteAll,
+                  child: Text('Delete all logs'),
+                ),
+              ],
+            ),
+        ],
       ),
       body: FutureBuilder<List<ExerciseLogEntry>>(
         future: _logsFuture,

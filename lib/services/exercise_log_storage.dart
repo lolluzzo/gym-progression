@@ -1,4 +1,5 @@
 import 'package:gym_progression/services/app_database.dart';
+import 'package:gym_progression/utils/exercise_name.dart';
 import 'package:sqflite/sqflite.dart';
 
 class ExerciseLogEntry {
@@ -75,16 +76,23 @@ class ExerciseLogStorage {
     }
   }
 
+  /// The logs of [exerciseName] under any spelling with the same
+  /// [exerciseKey], latest first.
   static Future<List<ExerciseLogEntry>> getLogsForExercise(
     String profileId,
     String exerciseName,
   ) async {
     final db = await _openDatabase();
     try {
+      final names = await _storedNames(db, profileId, exerciseName);
+      if (names.isEmpty) {
+        return [];
+      }
+
       final rows = await db.query(
         _tableName,
-        where: 'profile_id = ? AND exercise_name = ?',
-        whereArgs: [profileId, exerciseName],
+        where: 'profile_id = ? AND exercise_name IN (${_placeholders(names)})',
+        whereArgs: [profileId, ...names],
         orderBy: 'logged_at DESC, id DESC',
       );
 
@@ -112,6 +120,53 @@ class ExerciseLogStorage {
     }
   }
 
+  /// Moves the logs of [from] to the name [to]. Returns the number of logs
+  /// moved. When [to] already has logs, the two histories merge.
+  static Future<int> renameExercise(
+    String profileId,
+    String from,
+    String to,
+  ) async {
+    final db = await _openDatabase();
+    try {
+      final names = await _storedNames(db, profileId, from);
+      if (names.isEmpty) {
+        return 0;
+      }
+
+      return await db.update(
+        _tableName,
+        {'exercise_name': to},
+        where: 'profile_id = ? AND exercise_name IN (${_placeholders(names)})',
+        whereArgs: [profileId, ...names],
+      );
+    } finally {
+      await db.close();
+    }
+  }
+
+  /// Returns the number of logs deleted.
+  static Future<int> deleteLogsForExercise(
+    String profileId,
+    String exerciseName,
+  ) async {
+    final db = await _openDatabase();
+    try {
+      final names = await _storedNames(db, profileId, exerciseName);
+      if (names.isEmpty) {
+        return 0;
+      }
+
+      return await db.delete(
+        _tableName,
+        where: 'profile_id = ? AND exercise_name IN (${_placeholders(names)})',
+        whereArgs: [profileId, ...names],
+      );
+    } finally {
+      await db.close();
+    }
+  }
+
   static Future<void> deleteLog(int id) async {
     final db = await _openDatabase();
     try {
@@ -132,6 +187,33 @@ class ExerciseLogStorage {
     } finally {
       await db.close();
     }
+  }
+
+  /// The spellings of [exerciseName] the profile's logs use. SQLite's
+  /// lower() only folds ASCII, so the names are matched here.
+  static Future<List<String>> _storedNames(
+    Database db,
+    String profileId,
+    String exerciseName,
+  ) async {
+    final key = exerciseKey(exerciseName);
+    final rows = await db.query(
+      _tableName,
+      distinct: true,
+      columns: ['exercise_name'],
+      where: 'profile_id = ?',
+      whereArgs: [profileId],
+    );
+
+    return [
+      for (final row in rows)
+        if (exerciseKey(row['exercise_name'] as String) == key)
+          row['exercise_name'] as String,
+    ];
+  }
+
+  static String _placeholders(List<Object> values) {
+    return List.filled(values.length, '?').join(', ');
   }
 
   static String? _cleanValue(String? value) {

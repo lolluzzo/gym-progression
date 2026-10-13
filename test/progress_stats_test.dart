@@ -89,6 +89,16 @@ void main() {
       expect(personalRecordIds(logs), {4});
     });
 
+    test('treats names that differ only in case or spacing as one exercise',
+        () {
+      final logs = [
+        log(1, 'Bench press', '2026-09-01T10:00:00', weight: '80'),
+        log(2, 'bench  Press', '2026-09-08T10:00:00', weight: '85'),
+      ];
+
+      expect(personalRecordIds(logs), {2});
+    });
+
     test('skips logs without a numeric weight', () {
       final logs = [
         log(1, 'Pull-up', '2026-09-01T10:00:00', weight: 'bodyweight'),

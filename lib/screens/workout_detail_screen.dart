@@ -4,6 +4,7 @@ import 'package:gym_progression/models/workout.dart';
 import 'package:gym_progression/screens/exercise_history_logs.dart';
 import 'package:gym_progression/services/exercise_log_storage.dart';
 import 'package:gym_progression/services/progress_stats.dart';
+import 'package:gym_progression/utils/exercise_name.dart';
 import 'package:gym_progression/utils/week.dart';
 import 'package:gym_progression/widgets/celebration.dart';
 import 'package:gym_progression/widgets/weight_progress_chart.dart';
@@ -26,7 +27,9 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
   late Workout _workout;
   late final Map<String, TextEditingController> _weightControllers;
   late final Map<String, TextEditingController> _repsControllers;
+  // Both keyed by exerciseKey.
   Map<String, double> _bestWeights = {};
+  Map<String, ExerciseLogEntry> _lastLogs = {};
 
   String get _currentWeekKey => weekKeyFor(DateTime.now());
 
@@ -45,7 +48,7 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
       for (final exercise in _workout.exercises)
         exercise.id: TextEditingController(text: exercise.reps),
     };
-    _loadBestWeights();
+    _loadPastLogs();
   }
 
   @override
@@ -124,14 +127,18 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
     });
   }
 
-  Future<void> _loadBestWeights() async {
+  Future<void> _loadPastLogs() async {
     final logs = await ExerciseLogStorage.getLogsForProfile(widget.profileId);
     final bestWeights = <String, double>{};
+    final lastLogs = <String, ExerciseLogEntry>{};
     for (final log in logs) {
+      final key = exerciseKey(log.exerciseName);
+      // Logs arrive oldest first, so the last one wins.
+      lastLogs[key] = log;
       final weight = parseMetric(log.weight);
-      final best = bestWeights[log.exerciseName];
+      final best = bestWeights[key];
       if (weight != null && (best == null || weight > best)) {
-        bestWeights[log.exerciseName] = weight;
+        bestWeights[key] = weight;
       }
     }
 
@@ -139,7 +146,18 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
       return;
     }
 
-    setState(() => _bestWeights = bestWeights);
+    setState(() {
+      _bestWeights = bestWeights;
+      _lastLogs = lastLogs;
+    });
+  }
+
+  double? _bestWeight(ExerciseEntry exercise) {
+    return _bestWeights[exerciseKey(exercise.activeName)];
+  }
+
+  ExerciseLogEntry? _lastLog(ExerciseEntry exercise) {
+    return _lastLogs[exerciseKey(exercise.activeName)];
   }
 
   Future<void> _saveExerciseLog(ExerciseEntry exercise) async {
@@ -173,7 +191,7 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
       }
 
       if (weight != null && (previousBest == null || weight > previousBest)) {
-        setState(() => _bestWeights[exerciseName] = weight);
+        setState(() => _bestWeights[exerciseKey(exerciseName)] = weight);
       }
 
       if (previousBest != null && weight != null && weight > previousBest) {
@@ -213,8 +231,8 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
     }
   }
 
-  void _openExerciseHistory(ExerciseEntry exercise) {
-    Navigator.of(context).push(
+  Future<void> _openExerciseHistory(ExerciseEntry exercise) async {
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ExerciseHistoryLogsScreen(
           profileId: widget.profileId,
@@ -222,6 +240,10 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
         ),
       ),
     );
+    // Logs may have been deleted or moved there.
+    if (mounted) {
+      await _loadPastLogs();
+    }
   }
 
   @override
@@ -295,10 +317,8 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                         ),
-                        if (_bestWeights[exercise.activeName] != null)
-                          _BestWeightChip(
-                            weight: _bestWeights[exercise.activeName]!,
-                          ),
+                        if (_bestWeight(exercise) case final best?)
+                          _BestWeightChip(weight: best),
                       ],
                     ),
                     if (exercise.alternatives.isNotEmpty) ...[
@@ -347,10 +367,14 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
-                            decoration: const InputDecoration(
+                            // Last time's values are hints, not values, so
+                            // nothing old gets saved by accident.
+                            decoration: InputDecoration(
                               labelText: 'Weight',
-                              hintText: 'kg',
-                              border: OutlineInputBorder(),
+                              hintText: _lastLog(exercise)?.weight ?? 'kg',
+                              floatingLabelBehavior:
+                                  FloatingLabelBehavior.always,
+                              border: const OutlineInputBorder(),
                             ),
                           ),
                         ),
@@ -359,9 +383,12 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
                           child: TextField(
                             controller: _repsControllers[exercise.id],
                             keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               labelText: 'Reps',
-                              border: OutlineInputBorder(),
+                              hintText: _lastLog(exercise)?.reps,
+                              floatingLabelBehavior:
+                                  FloatingLabelBehavior.always,
+                              border: const OutlineInputBorder(),
                             ),
                           ),
                         ),
