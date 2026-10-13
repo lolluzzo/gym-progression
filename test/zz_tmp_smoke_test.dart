@@ -3,11 +3,14 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gym_progression/models/workout.dart';
+import 'package:gym_progression/screens/exercise_history_logs.dart';
 import 'package:gym_progression/screens/history_screen.dart';
 import 'package:gym_progression/screens/import_workouts_screen.dart';
 import 'package:gym_progression/screens/workout_detail_screen.dart';
 import 'package:gym_progression/screens/workout_editor_screen.dart';
+import 'package:gym_progression/services/app_settings.dart';
 import 'package:gym_progression/services/exercise_log_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -28,6 +31,8 @@ void main() {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfiNoIsolate;
     await databaseFactory.setDatabasesPath(dbDir);
+    SharedPreferences.setMockInitialValues({'sets_guide_seen': true});
+    await AppSettings.instance.load();
   });
 
   testWidgets('import screen previews and pops workouts', (tester) async {
@@ -105,6 +110,8 @@ void main() {
         ),
       ));
       await tester.tap(find.text('go'));
+      // Builds the screen here, so its database loads run on the real clock.
+      await tester.pump();
       await Future<void>.delayed(const Duration(milliseconds: 300));
     });
     await tester.pumpAndSettle();
@@ -117,20 +124,28 @@ void main() {
     await tester.enterText(find.byType(TextField).at(0), '30');
     await tester.enterText(find.byType(TextField).at(1), '10');
     await tester.runAsync(() async {
-      await tester.tap(find.text('Save log').first);
+      await tester.tap(find.text('Save 1 set').first);
       await Future<void>.delayed(const Duration(milliseconds: 500));
     });
     await tester.pump(const Duration(seconds: 3));
-    if (find.byType(Dialog).evaluate().isNotEmpty) {
-      await tester.tap(find.descendant(of: find.byType(Dialog), matching: find.byType(FilledButton)));
+    // The first log can unlock an achievement, shown in a celebration.
+    if (find.text("Let's go!").evaluate().isNotEmpty) {
+      await tester.tap(find.text("Let's go!"));
     }
     await tester.pump(const Duration(seconds: 1));
+    // The save ends once the celebration closes, on the real clock.
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pump(const Duration(seconds: 1));
     final logs = await tester.runAsync(() => ExerciseLogStorage.getLogsForProfile('smoke'));
     expect(logs!.single.exerciseName, 'Dumbbell press');
     expect(logs.single.workoutId, 'w1');
     expect(logs.single.workoutName, 'Push');
-    await tester.tap(find.text('Save progress'));
+    await tester.ensureVisible(find.text('Save progress'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Save progress'));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    });
     await tester.pumpAndSettle();
     expect(popped!.exercises.first.activeName, 'Dumbbell press');
   });
@@ -145,11 +160,40 @@ void main() {
     print(find.byType(Text).evaluate().map((e) => (e.widget as Text).data).toList());
     await tester.pump(const Duration(seconds: 1));
     expect(find.text('Push'), findsOneWidget);
-    expect(find.textContaining('1 exercise'), findsOneWidget);
+    expect(find.textContaining(' · 1 exercise'), findsOneWidget);
     await tester.tap(find.text('Push'));
     await tester.pumpAndSettle();
     expect(find.text('Dumbbell press'), findsOneWidget);
-    expect(find.text('30 kg × 10 reps'), findsOneWidget);
+    expect(find.text('30×10'), findsOneWidget);
+    await tester.runAsync(() => ExerciseLogStorage.deleteLogsForProfile('smoke'));
+  });
+
+  testWidgets('exercise history shows one card per session', (tester) async {
+    await tester.runAsync(() async {
+      await ExerciseLogStorage.saveSets(
+        profileId: 'smoke',
+        exerciseName: 'Bench press',
+        sets: const [
+          SetToSave(weight: '60', reps: '10', isWarmup: true),
+          SetToSave(weight: '80', reps: '8'),
+          SetToSave(weight: '85', reps: '6'),
+        ],
+        workoutId: 'w1',
+        workoutName: 'Push',
+      );
+      await tester.pumpWidget(const MaterialApp(
+        home: ExerciseHistoryLogsScreen(profileId: 'smoke', exerciseName: 'Bench press'),
+      ));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    });
+    await tester.pump();
+    expect(find.text('1 session · latest first'), findsOneWidget);
+    expect(find.text('Push'), findsOneWidget);
+    expect(find.text('W'), findsOneWidget);
+    expect(find.text('60 kg × 10'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
+    expect(find.text('85 kg × 6'), findsOneWidget);
+    expect(find.textContaining('Volume'), findsOneWidget);
     await tester.runAsync(() => ExerciseLogStorage.deleteLogsForProfile('smoke'));
   });
 }

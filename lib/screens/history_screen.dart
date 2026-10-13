@@ -5,6 +5,7 @@ import 'package:gym_progression/services/exercise_log_storage.dart';
 import 'package:gym_progression/services/progress_stats.dart';
 import 'package:gym_progression/services/training_sessions.dart';
 import 'package:gym_progression/services/workout_storage.dart';
+import 'package:gym_progression/widgets/set_row.dart';
 
 typedef _History = ({
   List<TrainingSession> sessions,
@@ -61,19 +62,6 @@ class _HistoryViewState extends State<HistoryView> {
     String twoDigits(int value) => value.toString().padLeft(2, '0');
 
     return '${twoDigits(day.day)}/${twoDigits(day.month)}/${day.year}';
-  }
-
-  String _formatLog(ExerciseLogEntry log) {
-    final weight = parseMetric(log.weight);
-    final parts = [
-      if (weight != null)
-        '${formatNumber(weight)} kg'
-      else if (log.weight != null)
-        log.weight!,
-      if (log.reps != null) '${log.reps} reps',
-    ];
-
-    return parts.isEmpty ? 'No values' : parts.join(' × ');
   }
 
   Widget _buildMessage(IconData icon, String title, String message) {
@@ -176,7 +164,7 @@ class _HistoryViewState extends State<HistoryView> {
               in logsByExercise.entries)
             ListTile(
               title: Text(exerciseName),
-              subtitle: Text(logs.map(_formatLog).join('\n')),
+              subtitle: Text.rich(setsLineSpan(context, logs)),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => _openExerciseHistory(exerciseName),
             ),
@@ -214,7 +202,7 @@ class _HistoryViewState extends State<HistoryView> {
               ? _buildMessage(
                   Icons.history_toggle_off,
                   'No trainings yet',
-                  'Save a log for an exercise during a workout to see it here.',
+                  'Save a set during a workout to see it here.',
                 )
               : ListView(
                   physics: const AlwaysScrollableScrollPhysics(),

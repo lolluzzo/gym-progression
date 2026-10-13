@@ -6,10 +6,10 @@ import 'package:gym_progression/services/exercise_log_storage.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 Future<void> saveLog(String profileId, String exerciseName) {
-  return ExerciseLogStorage.saveLog(
+  return ExerciseLogStorage.saveSets(
     profileId: profileId,
     exerciseName: exerciseName,
-    weight: '80',
+    sets: const [SetToSave(weight: '80')],
   );
 }
 

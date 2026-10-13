@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:gym_progression/services/completion_storage.dart';
 import 'package:gym_progression/services/exercise_log_storage.dart';
+import 'package:gym_progression/services/training_sessions.dart';
 import 'package:gym_progression/services/workout_storage.dart';
 import 'package:gym_progression/utils/exercise_name.dart';
 import 'package:gym_progression/utils/week.dart';
@@ -34,27 +35,46 @@ String formatVolume(double kilograms) {
   return '${(kilograms / 1000).toStringAsFixed(1)} t';
 }
 
-/// Ids of the logs that beat every earlier weight for the same exercise.
-/// The first weighted log of an exercise sets the baseline and is not a PR.
-Set<int> personalRecordIds(List<ExerciseLogEntry> logs) {
-  final chronological = [...logs]..sort((a, b) {
-      final byDate = a.loggedAt.compareTo(b.loggedAt);
-      return byDate != 0 ? byDate : a.id.compareTo(b.id);
-    });
+/// The weight of a working set. Warm-ups don't count in any stat.
+double? _workingWeight(ExerciseLogEntry log) {
+  return log.isWarmup ? null : parseMetric(log.weight);
+}
 
+/// The heaviest working set of each exercise in each session, oldest
+/// session first. Sets without a numeric weight are skipped.
+List<ExerciseLogEntry> topSets(List<ExerciseLogEntry> logs) {
+  final tops = <ExerciseLogEntry>[];
+  for (final session in groupSessions(logs).reversed) {
+    final topByExercise = <String, ExerciseLogEntry>{};
+    for (final log in session.logs) {
+      final weight = _workingWeight(log);
+      if (weight == null) {
+        continue;
+      }
+      final key = exerciseKey(log.exerciseName);
+      final top = topByExercise[key];
+      if (top == null || weight > _workingWeight(top)!) {
+        topByExercise[key] = log;
+      }
+    }
+    tops.addAll(topByExercise.values);
+  }
+  return tops;
+}
+
+/// Ids of the top sets that beat every earlier session of the same
+/// exercise, so a session has at most one PR. The first session of an
+/// exercise sets the baseline and has none.
+Set<int> personalRecordIds(List<ExerciseLogEntry> logs) {
   final bestByExercise = <String, double>{};
   final recordIds = <int>{};
 
-  for (final log in chronological) {
-    final weight = parseMetric(log.weight);
-    if (weight == null) {
-      continue;
-    }
-
-    final key = exerciseKey(log.exerciseName);
+  for (final top in topSets(logs)) {
+    final weight = _workingWeight(top)!;
+    final key = exerciseKey(top.exerciseName);
     final best = bestByExercise[key];
     if (best != null && weight > best) {
-      recordIds.add(log.id);
+      recordIds.add(top.id);
     }
     if (best == null || weight > best) {
       bestByExercise[key] = weight;
@@ -65,15 +85,15 @@ Set<int> personalRecordIds(List<ExerciseLogEntry> logs) {
 }
 
 double? bestWeight(List<ExerciseLogEntry> logs) {
-  final weights = logs.map((log) => parseMetric(log.weight)).whereType<double>();
+  final weights = logs.map(_workingWeight).whereType<double>();
   return weights.isEmpty ? null : weights.reduce(math.max);
 }
 
-/// Sum of weight x reps over the logs where both are numbers.
+/// Sum of weight x reps over the working sets where both are numbers.
 double totalVolume(List<ExerciseLogEntry> logs) {
   var total = 0.0;
   for (final log in logs) {
-    final weight = parseMetric(log.weight);
+    final weight = _workingWeight(log);
     final reps = parseMetric(log.reps);
     if (weight != null && reps != null) {
       total += weight * reps;

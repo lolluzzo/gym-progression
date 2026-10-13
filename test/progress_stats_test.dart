@@ -10,6 +10,7 @@ ExerciseLogEntry log(
   String loggedAt, {
   String? weight,
   String? reps,
+  bool isWarmup = false,
 }) {
   return ExerciseLogEntry(
     id: id,
@@ -17,6 +18,7 @@ ExerciseLogEntry log(
     loggedAt: DateTime.parse(loggedAt),
     weight: weight,
     reps: reps,
+    isWarmup: isWarmup,
   );
 }
 
@@ -108,6 +110,35 @@ void main() {
       ];
 
       expect(personalRecordIds(logs), {4});
+    });
+
+    test('a ramp inside one session is one PR, and the first is the baseline',
+        () {
+      final logs = [
+        log(1, 'Bench', '2026-09-01T10:00:00', weight: '60'),
+        log(2, 'Bench', '2026-09-01T10:05:00', weight: '80'),
+        log(3, 'Bench', '2026-09-01T10:10:00', weight: '85'),
+        log(4, 'Bench', '2026-09-08T10:00:00', weight: '80'),
+        log(5, 'Bench', '2026-09-08T10:05:00', weight: '87.5'),
+        log(6, 'Bench', '2026-09-08T10:10:00', weight: '90'),
+      ];
+
+      expect(personalRecordIds(logs), {6});
+      expect(topSets(logs).map((log) => log.id), [3, 6]);
+    });
+
+    test('a heavy warm-up is never a PR, nor the best, nor volume', () {
+      final logs = [
+        log(1, 'Bench', '2026-09-01T10:00:00', weight: '80', reps: '5'),
+        log(2, 'Bench', '2026-09-08T10:00:00',
+            weight: '100', reps: '1', isWarmup: true),
+        log(3, 'Bench', '2026-09-08T10:05:00', weight: '80', reps: '5'),
+      ];
+
+      expect(personalRecordIds(logs), isEmpty);
+      expect(bestWeight(logs), 80);
+      expect(totalVolume(logs), 800);
+      expect(topSets(logs).map((log) => log.id), [1, 3]);
     });
   });
 

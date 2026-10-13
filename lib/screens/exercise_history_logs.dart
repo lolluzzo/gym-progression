@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:gym_progression/services/exercise_log_storage.dart';
 import 'package:gym_progression/services/progress_stats.dart';
+import 'package:gym_progression/services/training_sessions.dart';
 import 'package:gym_progression/services/workout_storage.dart';
 import 'package:gym_progression/utils/exercise_name.dart';
 import 'package:gym_progression/widgets/dialogs.dart';
@@ -53,19 +54,42 @@ class _ExerciseHistoryLogsScreenState extends State<ExerciseHistoryLogsScreen> {
     await _logsFuture;
   }
 
-  Future<void> _deleteLog(ExerciseLogEntry entry) async {
+  /// Asks, then deletes the set. Returns false so a swiped row slides back:
+  /// the reloaded list no longer has it.
+  Future<bool> _deleteLog(ExerciseLogEntry entry) async {
     final confirmed = await showConfirmDialog(
       context,
-      title: 'Delete log?',
+      title: 'Delete set?',
       message:
-          'The log from ${_formatLoggedAt(entry.loggedAt)} will be removed.',
+          'The set from ${_formatLoggedAt(entry.loggedAt)} will be removed.',
     );
-    if (!confirmed) {
-      return;
+    if (confirmed) {
+      await _deleteLogs([entry.id], 'Unable to delete the set.');
     }
+    return false;
+  }
 
+  Future<void> _deleteSession(TrainingSession session) async {
+    final count = session.logs.length;
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Delete session?',
+      message:
+          '${count == 1 ? 'Its set' : 'All $count sets'} of ${_formatDay(session.day)} will be removed.',
+    );
+    if (confirmed) {
+      await _deleteLogs(
+        [for (final log in session.logs) log.id],
+        'Unable to delete the session.',
+      );
+    }
+  }
+
+  Future<void> _deleteLogs(List<int> ids, String errorMessage) async {
     try {
-      await ExerciseLogStorage.deleteLog(entry.id);
+      for (final id in ids) {
+        await ExerciseLogStorage.deleteLog(id);
+      }
       if (!mounted) {
         return;
       }
@@ -77,7 +101,7 @@ class _ExerciseHistoryLogsScreenState extends State<ExerciseHistoryLogsScreen> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to delete the log.')),
+        SnackBar(content: Text(errorMessage)),
       );
     }
   }
@@ -214,18 +238,19 @@ class _ExerciseHistoryLogsScreenState extends State<ExerciseHistoryLogsScreen> {
     }
   }
 
-  String _formatMetric(String? value, {String suffix = ''}) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Not set';
-    }
+  /// "80 kg × 8", "× 12" without weight, "80 kg" without reps.
+  String _formatSet(ExerciseLogEntry log) {
+    final parts = [
+      if (log.weight != null) '${log.weight} kg',
+      if (log.reps != null) '× ${log.reps}',
+    ];
+    return parts.isEmpty ? 'No values' : parts.join(' ');
+  }
 
-    final formatted = value.trim();
-    if (formatted.endsWith('.0')) {
-      final withoutDecimals = formatted.substring(0, formatted.length - 2);
-      return suffix.isEmpty ? withoutDecimals : '$withoutDecimals $suffix';
-    }
+  String _formatDay(DateTime day) {
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
 
-    return suffix.isEmpty ? formatted : '$formatted $suffix';
+    return '${twoDigits(day.day)}/${twoDigits(day.month)}/${day.year}';
   }
 
   String _formatLoggedAt(DateTime loggedAt) {
@@ -270,13 +295,15 @@ class _ExerciseHistoryLogsScreenState extends State<ExerciseHistoryLogsScreen> {
     );
   }
 
-  /// Best / latest / PR tiles and the weight chart, above the log list.
-  Widget _buildSummary(List<ExerciseLogEntry> logs, Set<int> recordIds) {
+  /// Best / latest / PR tiles and the weight chart, above the sessions.
+  Widget _buildSummary(
+    List<ExerciseLogEntry> logs,
+    int sessionCount,
+    Set<int> recordIds,
+  ) {
     final theme = Theme.of(context);
-    // Logs arrive latest first; the chart reads oldest first.
-    final weightedLogs = logs.reversed
-        .where((log) => parseMetric(log.weight) != null)
-        .toList();
+    // One point per session: its top set, oldest first.
+    final weightedLogs = topSets(logs);
     final best = bestWeight(logs);
     final latest =
         weightedLogs.isEmpty ? null : parseMetric(weightedLogs.last.weight);
@@ -329,7 +356,7 @@ class _ExerciseHistoryLogsScreenState extends State<ExerciseHistoryLogsScreen> {
                       const SizedBox(width: 12),
                       const Expanded(
                         child: Text(
-                          'Save at least 2 logs with a weight to see your progress chart.',
+                          'Log a weight in at least 2 sessions to see your progress chart.',
                         ),
                       ),
                     ],
@@ -338,66 +365,108 @@ class _ExerciseHistoryLogsScreenState extends State<ExerciseHistoryLogsScreen> {
         ),
         const SizedBox(height: 12),
         Text(
-          '${logs.length} saved ${logs.length == 1 ? 'entry' : 'entries'} · latest first',
+          '$sessionCount ${sessionCount == 1 ? 'session' : 'sessions'} · latest first',
           style: theme.textTheme.bodySmall,
         ),
       ],
     );
   }
 
-  Widget _buildEntryCard({
-    required ExerciseLogEntry entry,
-    required int index,
-    required bool isRecord,
-  }) {
+  /// One training of this exercise. Swipe a set to delete it, or delete the
+  /// whole session from the menu.
+  Widget _buildSessionCard(TrainingSession session, Set<int> recordIds) {
     final theme = Theme.of(context);
+    final volume = totalVolume(session.logs);
+    final isRecord = session.logs.any((log) => recordIds.contains(log.id));
+    var number = 0;
 
     return Card(
+      clipBehavior: Clip.antiAlias,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.only(top: 8, bottom: 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Text(
-                  'Log #${index + 1}',
-                  style: theme.textTheme.titleMedium,
-                ),
-                if (isRecord) ...[
-                  const SizedBox(width: 8),
-                  const _RecordChip(),
+            Padding(
+              padding: const EdgeInsets.only(left: 16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _formatDay(session.day),
+                          style: theme.textTheme.titleMedium,
+                        ),
+                        if (session.workoutName case final workoutName?)
+                          Text(workoutName, style: theme.textTheme.bodySmall),
+                      ],
+                    ),
+                  ),
+                  if (isRecord) const _RecordChip(),
+                  PopupMenuButton<String>(
+                    tooltip: 'Session options',
+                    onSelected: (_) => _deleteSession(session),
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: Text('Delete session'),
+                      ),
+                    ],
+                  ),
                 ],
-                const Spacer(),
-                Text(
-                  _formatLoggedAt(entry.loggedAt),
+              ),
+            ),
+            for (final log in session.logs)
+              Dismissible(
+                key: ValueKey(log.id),
+                direction: DismissDirection.endToStart,
+                confirmDismiss: (_) => _deleteLog(log),
+                background: Container(
+                  alignment: Alignment.centerRight,
+                  padding: const EdgeInsets.only(right: 16),
+                  color: theme.colorScheme.errorContainer,
+                  child: Icon(
+                    Icons.delete_outline,
+                    color: theme.colorScheme.onErrorContainer,
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 28,
+                        child: Text(
+                          log.isWarmup ? 'W' : '${++number}',
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: log.isWarmup
+                                ? theme.colorScheme.tertiary
+                                : theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        _formatSet(log),
+                        style: log.isWarmup
+                            ? TextStyle(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              )
+                            : null,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (volume > 0)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                child: Text(
+                  'Volume ${formatVolume(volume)}',
                   style: theme.textTheme.bodySmall,
                 ),
-                IconButton(
-                  onPressed: () => _deleteLog(entry),
-                  icon: const Icon(Icons.delete_outline),
-                  tooltip: 'Delete log',
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _MetricTile(
-                    label: 'Weight',
-                    value: _formatMetric(entry.weight, suffix: 'kg'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _MetricTile(
-                    label: 'Reps',
-                    value: _formatMetric(entry.reps),
-                  ),
-                ),
-              ],
-            ),
+              ),
           ],
         ),
       ),
@@ -460,32 +529,27 @@ class _ExerciseHistoryLogsScreenState extends State<ExerciseHistoryLogsScreen> {
               child: _buildStatusState(
                 icon: Icons.history_toggle_off,
                 title: 'No history yet',
-                message:
-                    'Save a log from the workout detail screen to see it here.',
+                message: 'Save a set from a workout to see it here.',
               ),
             );
           }
 
           final recordIds = personalRecordIds(logs);
+          final sessions = groupSessions(logs);
 
           return RefreshIndicator(
             onRefresh: _refreshLogs,
             child: ListView.separated(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-              itemCount: logs.length + 1,
+              itemCount: sessions.length + 1,
               separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
                 if (index == 0) {
-                  return _buildSummary(logs, recordIds);
+                  return _buildSummary(logs, sessions.length, recordIds);
                 }
 
-                final entry = logs[index - 1];
-                return _buildEntryCard(
-                  entry: entry,
-                  index: index - 1,
-                  isRecord: recordIds.contains(entry.id),
-                );
+                return _buildSessionCard(sessions[index - 1], recordIds);
               },
             ),
           );

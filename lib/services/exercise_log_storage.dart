@@ -67,30 +67,6 @@ class ExerciseLogStorage {
 
   static Future<Database> _openDatabase() => AppDatabase.open();
 
-  static Future<void> saveLog({
-    required String profileId,
-    required String exerciseName,
-    String? weight,
-    String? reps,
-    String? workoutId,
-    String? workoutName,
-  }) async {
-    final db = await _openDatabase();
-    try {
-      await db.insert(_tableName, {
-        'profile_id': profileId,
-        'exercise_name': exerciseName,
-        'weight': _cleanValue(weight),
-        'reps': _cleanValue(reps),
-        'logged_at': DateTime.now().toIso8601String(),
-        'workout_id': workoutId,
-        'workout_name': workoutName,
-      });
-    } finally {
-      await db.close();
-    }
-  }
-
   /// Saves the sets of one exercise in one transaction. A set with an id
   /// updates its log in place and keeps its time. A set without one is
   /// inserted. The logs in [deletedIds] are deleted. Returns the log id of

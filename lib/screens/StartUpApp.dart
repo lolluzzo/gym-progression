@@ -38,6 +38,9 @@ class _StartUpAppState extends State<StartUpApp> {
   int _streak = 0;
   int _tabIndex = 0;
 
+  /// The exercise keys logged this week, by the workout they were logged in.
+  Map<String, Set<String>> _loggedThisWeek = {};
+
   String get _currentWeekKey => weekKeyFor(DateTime.now());
 
   String get _profileId => _profile?.id ?? Profile.ownerId;
@@ -92,6 +95,7 @@ class _StartUpAppState extends State<StartUpApp> {
 
       await WorkoutStorage.saveWorkouts(_profileId, normalizedWorkouts);
       await _loadStreak();
+      await _loadWeekLogs();
     } catch (_) {
       if (!mounted) {
         return;
@@ -244,6 +248,8 @@ class _StartUpAppState extends State<StartUpApp> {
         ),
       ),
     );
+    // Sets are saved per exercise, even when the workout isn't.
+    await _loadWeekLogs();
 
     if (updatedWorkout == null) {
       return;
@@ -307,6 +313,24 @@ class _StartUpAppState extends State<StartUpApp> {
     setState(() => _streak = stats.currentStreak);
   }
 
+  Future<void> _loadWeekLogs() async {
+    final logs = await ExerciseLogStorage.getLogsForProfile(_profileId);
+    final logged = <String, Set<String>>{};
+    for (final log in logs) {
+      final workoutId = log.workoutId;
+      if (workoutId != null && weekKeyFor(log.loggedAt) == _currentWeekKey) {
+        logged
+            .putIfAbsent(workoutId, () => {})
+            .add(exerciseKey(log.exerciseName));
+      }
+    }
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _loggedThisWeek = logged);
+  }
+
   Future<void> _openProfile(Profile profile) async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => ProfileScreen(profile: profile)),
@@ -331,14 +355,16 @@ class _StartUpAppState extends State<StartUpApp> {
   }
 
   String _subtitleForWorkout(Workout workout) {
-    final trackedExercises = workout.exercises.where(
-      (exercise) => exercise.weight.isNotEmpty || exercise.reps.isNotEmpty,
+    final logged = _loggedThisWeek[workout.id] ?? const <String>{};
+    final loggedExercises = workout.exercises.where(
+      (exercise) =>
+          exercise.forms.any((form) => logged.contains(exerciseKey(form))),
     );
 
     final status = _isCompletedThisWeek(workout)
         ? 'Completed this week'
         : 'To complete this week';
-    return '$status • ${workout.exercises.length} exercises • ${trackedExercises.length} updated';
+    return '$status • ${workout.exercises.length} exercises • ${loggedExercises.length} logged';
   }
 
   String _formatDate(DateTime date) {

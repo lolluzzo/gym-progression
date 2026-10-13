@@ -1,6 +1,6 @@
 # Plan: sets (series)
 
-Status as of 2026-10-13: plan only. Revised from the 2026-10-07 version to match your request: once you fill a row a new one appears, and one save logs every set. Updated the same day with your decisions (section 6): one save, a warm-up flag, per-set reps in plans, hints that are never saved, and a first-run guide.
+Status as of 2026-10-13: steps 1–6 implemented and covered by tests. The real session on the phone (step 2) is still to do, and step 7 is for later. Decisions are in section 6.
 
 ## 1. The concept
 
@@ -89,7 +89,7 @@ The first time you open a workout after this update, a modal explains how to log
 
 - It shows once: a `sets_guide_seen` flag in `AppSettings` (SharedPreferences, next to `dark_mode`).
 - A **?** button in the workout app bar opens it again.
-- Flutter: `showDialog` with a `PageView`. The illustrations reuse the set row widget with fixed values, so the guide always matches the screen.
+- Flutter: `showDialog` that shows one page at a time (Next/Back, or a swipe), so the dialog fits each page's height. The illustrations reuse the set row widget with fixed values, so the guide always matches the screen.
 
 ### History tab
 
