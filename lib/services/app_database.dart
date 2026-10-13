@@ -15,7 +15,7 @@ class AppDatabase {
 
     return openDatabase(
       fullPath,
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await _ensureSchema(db);
       },
@@ -32,6 +32,13 @@ class AppDatabase {
           await db.execute('ALTER TABLE $logsTable ADD COLUMN workout_id TEXT');
           await db
               .execute('ALTER TABLE $logsTable ADD COLUMN workout_name TEXT');
+        }
+        // v4: a log can be a warm-up set, which stats skip. Existing logs are
+        // working sets.
+        if (oldVersion < 4) {
+          await db.execute(
+            'ALTER TABLE $logsTable ADD COLUMN is_warmup INTEGER NOT NULL DEFAULT 0',
+          );
         }
       },
       onOpen: (db) async {
@@ -50,7 +57,8 @@ class AppDatabase {
         logged_at TEXT NOT NULL,
         profile_id TEXT NOT NULL DEFAULT '${Profile.ownerId}',
         workout_id TEXT,
-        workout_name TEXT
+        workout_name TEXT,
+        is_warmup INTEGER NOT NULL DEFAULT 0
       )
     ''');
     await db.execute('''

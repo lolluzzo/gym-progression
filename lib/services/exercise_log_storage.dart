@@ -11,6 +11,7 @@ class ExerciseLogEntry {
     this.reps,
     this.workoutId,
     this.workoutName,
+    this.isWarmup = false,
   });
 
   final int id;
@@ -23,6 +24,9 @@ class ExerciseLogEntry {
   /// remembered their workout.
   final String? workoutId;
   final String? workoutName;
+
+  /// Warm-up sets are kept out of PRs and stats.
+  final bool isWarmup;
 
   factory ExerciseLogEntry.fromMap(Map<String, Object?> map) {
     String? asText(Object? value) {
@@ -41,8 +45,19 @@ class ExerciseLogEntry {
       loggedAt: DateTime.parse(map['logged_at'] as String),
       workoutId: map['workout_id'] as String?,
       workoutName: map['workout_name'] as String?,
+      isWarmup: map['is_warmup'] == 1,
     );
   }
+}
+
+/// A set to save. [id] is its log id, or null for a set not saved yet.
+class SetToSave {
+  const SetToSave({this.id, this.weight, this.reps, this.isWarmup = false});
+
+  final int? id;
+  final String? weight;
+  final String? reps;
+  final bool isWarmup;
 }
 
 class ExerciseLogStorage {
@@ -71,6 +86,94 @@ class ExerciseLogStorage {
         'workout_id': workoutId,
         'workout_name': workoutName,
       });
+    } finally {
+      await db.close();
+    }
+  }
+
+  /// Saves the sets of one exercise in one transaction. A set with an id
+  /// updates its log in place and keeps its time. A set without one is
+  /// inserted. The logs in [deletedIds] are deleted. Returns the log id of
+  /// each set, in the order of [sets].
+  static Future<List<int>> saveSets({
+    required String profileId,
+    required String exerciseName,
+    required List<SetToSave> sets,
+    List<int> deletedIds = const [],
+    String? workoutId,
+    String? workoutName,
+  }) async {
+    final db = await _openDatabase();
+    try {
+      return await db.transaction((txn) async {
+        if (deletedIds.isNotEmpty) {
+          await txn.delete(
+            _tableName,
+            where: 'profile_id = ? AND id IN (${_placeholders(deletedIds)})',
+            whereArgs: [profileId, ...deletedIds],
+          );
+        }
+
+        final ids = <int>[];
+        for (final set in sets) {
+          final values = {
+            'weight': _cleanValue(set.weight),
+            'reps': _cleanValue(set.reps),
+            'is_warmup': set.isWarmup ? 1 : 0,
+          };
+          final id = set.id;
+          if (id != null) {
+            await txn.update(
+              _tableName,
+              values,
+              where: 'profile_id = ? AND id = ?',
+              whereArgs: [profileId, id],
+            );
+            ids.add(id);
+          } else {
+            ids.add(await txn.insert(_tableName, {
+              ...values,
+              'profile_id': profileId,
+              'exercise_name': exerciseName,
+              'logged_at': DateTime.now().toIso8601String(),
+              'workout_id': workoutId,
+              'workout_name': workoutName,
+            }));
+          }
+        }
+        return ids;
+      });
+    } finally {
+      await db.close();
+    }
+  }
+
+  /// The sets saved from [workoutId] on the same local day as [day], in the
+  /// order they were added. Reopening a workout continues from them.
+  static Future<List<ExerciseLogEntry>> getSetsForDay(
+    String profileId,
+    String workoutId,
+    DateTime day,
+  ) async {
+    // logged_at is a local ISO 8601 string, so the day compares as text.
+    final start = DateTime(day.year, day.month, day.day);
+    final end = DateTime(day.year, day.month, day.day + 1);
+    final db = await _openDatabase();
+    try {
+      final rows = await db.query(
+        _tableName,
+        where: 'profile_id = ? AND workout_id = ? '
+            'AND logged_at >= ? AND logged_at < ?',
+        whereArgs: [
+          profileId,
+          workoutId,
+          start.toIso8601String(),
+          end.toIso8601String(),
+        ],
+        orderBy: 'id ASC',
+      );
+
+      return rows.map(ExerciseLogEntry.fromMap).toList();
     } finally {
       await db.close();
     }

@@ -47,3 +47,5 @@ app.*.map.json
 
 # Release builds (build-android.sh / build-ios.sh)
 /dist/
+# Widget Preview related
+.widget_preview/
