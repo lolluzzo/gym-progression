@@ -40,6 +40,21 @@ class _ImportWorkoutsScreenState extends State<ImportWorkoutsScreen> {
     setState(() => _textController.text = text);
   }
 
+  Future<void> _copyAiPrompt() async {
+    await Clipboard.setData(const ClipboardData(text: workoutImportAiPrompt));
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Prompt copied. Paste it into an AI chat with your workout, then paste the reply here.',
+        ),
+      ),
+    );
+  }
+
   void _import(List<ImportedWorkout> importedWorkouts) {
     final now = DateTime.now();
     final workouts = [
@@ -98,13 +113,21 @@ class _ImportWorkoutsScreenState extends State<ImportWorkoutsScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-              onPressed: _paste,
-              icon: const Icon(Icons.content_paste),
-              label: const Text('Paste'),
-            ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _paste,
+                icon: const Icon(Icons.content_paste),
+                label: const Text('Paste'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _copyAiPrompt,
+                icon: const Icon(Icons.auto_awesome),
+                label: const Text('Copy AI prompt'),
+              ),
+            ],
           ),
           const SizedBox(height: 24),
           Text(
